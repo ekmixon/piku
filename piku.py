@@ -2,6 +2,7 @@
 
 "Piku Micro-PaaS"
 
+
 try:
     from sys import version_info
     assert version_info >= (3, 5)
@@ -56,7 +57,7 @@ ACME_WWW = abspath(join(PIKU_ROOT, "acme"))
 # === Make sure we can access piku user-installed binaries === #
 
 if PIKU_BIN not in environ['PATH']:
-    environ['PATH'] = PIKU_BIN + ":" + environ['PATH']
+    environ['PATH'] = f"{PIKU_BIN}:" + environ['PATH']
 
 # pylint: disable=anomalous-backslash-in-string
 NGINX_TEMPLATE = """
@@ -207,7 +208,7 @@ def exit_if_invalid(app):
 
     app = sanitize_app_name(app)
     if not exists(join(APP_ROOT, app)):
-        echo("Error: app '{}' not found.".format(app), fg='red')
+        echo(f"Error: app '{app}' not found.", fg='red')
         exit(1)
     return app
 
@@ -261,21 +262,23 @@ def parse_procfile(filename):
                 # Check for cron patterns
                 if kind == "cron":
                     limits = [59, 24, 31, 12, 7]
-                    matches = match(CRON_REGEXP, command)
-                    if matches:
+                    if matches := match(CRON_REGEXP, command):
                         for i in range(len(limits)):
                             if int(matches[i + 1].replace("*/", "").replace("*", "1")) > limits[i]:
                                 raise ValueError
                 workers[kind] = command
             except Exception:
-                echo("Warning: misformatted Procfile entry '{}' at line {}".format(line, line_number), fg='yellow')
-    if len(workers) == 0:
+                echo(
+                    f"Warning: misformatted Procfile entry '{line}' at line {line_number}",
+                    fg='yellow',
+                )
+
+    if not workers:
         return {}
     # WSGI trumps regular web workers
-    if 'wsgi' in workers or 'jwsgi' in workers:
-        if 'web' in workers:
-            echo("Warning: found both 'wsgi' and 'web' workers, disabling 'web'", fg='yellow')
-            del workers['web']
+    if ('wsgi' in workers or 'jwsgi' in workers) and 'web' in workers:
+        echo("Warning: found both 'wsgi' and 'web' workers, disabling 'web'", fg='yellow')
+        del workers['web']
     return workers
 
 
@@ -312,7 +315,7 @@ def parse_settings(filename, env={}):
                 k, v = map(lambda x: x.strip(), line.split("=", 1))
                 env[k] = expandvars(v, env)
             except Exception:
-                echo("Error: malformed setting '{}', ignoring file.".format(line), fg='red')
+                echo(f"Error: malformed setting '{line}', ignoring file.", fg='red')
                 return {}
     return env
 
@@ -320,18 +323,16 @@ def parse_settings(filename, env={}):
 def check_requirements(binaries):
     """Checks if all the binaries exist and are executable"""
 
-    echo("-----> Checking requirements: {}".format(binaries), fg='green')
+    echo(f"-----> Checking requirements: {binaries}", fg='green')
     requirements = list(map(which, binaries))
     echo(str(requirements))
 
-    if None in requirements:
-        return False
-    return True
+    return None not in requirements
 
 
 def found_app(kind):
     """Helper function to output app detected"""
-    echo("-----> {} app detected.".format(kind), fg='green')
+    echo(f"-----> {kind} app detected.", fg='green')
     return True
 
 
@@ -344,10 +345,10 @@ def do_deploy(app, deltas={}, newrev=None):
 
     env = {'GIT_WORK_DIR': app_path}
     if exists(app_path):
-        echo("-----> Deploying app '{}'".format(app), fg='green')
+        echo(f"-----> Deploying app '{app}'", fg='green')
         call('git fetch --quiet', cwd=app_path, env=env, shell=True)
         if newrev:
-            call('git reset --hard {}'.format(newrev), cwd=app_path, env=env, shell=True)
+            call(f'git reset --hard {newrev}', cwd=app_path, env=env, shell=True)
         call('git submodule init', cwd=app_path, env=env, shell=True)
         call('git submodule update', cwd=app_path, env=env, shell=True)
         if not exists(log_path):
@@ -356,7 +357,7 @@ def do_deploy(app, deltas={}, newrev=None):
         if workers and len(workers) > 0:
             settings = {}
             if exists(join(app_path, 'requirements.txt')) and found_app("Python"):
-                settings.update(deploy_python(app, deltas))
+                settings |= deploy_python(app, deltas)
             elif exists(join(app_path, 'package.json')) and found_app("Node") and (
                     check_requirements(['nodejs', 'npm']) or check_requirements(['node', 'npm']) or check_requirements(['nodeenv'])):
                 settings.update(deploy_node(app, deltas))
@@ -379,15 +380,16 @@ def do_deploy(app, deltas={}, newrev=None):
             # TODO: detect other runtimes
             if "release" in workers:
                 echo("-----> Releasing", fg='green')
-                retval = call(workers["release"], cwd=app_path, env=settings, shell=True)
-                if retval:
-                    echo("-----> Exiting due to release command error value: {}".format(retval))
+                if retval := call(
+                    workers["release"], cwd=app_path, env=settings, shell=True
+                ):
+                    echo(f"-----> Exiting due to release command error value: {retval}")
                     exit(retval)
                 workers.pop("release", None)
         else:
-            echo("Error: Invalid Procfile for app '{}'.".format(app), fg='red')
+            echo(f"Error: Invalid Procfile for app '{app}'.", fg='red')
     else:
-        echo("Error: app '{}' not found.".format(app), fg='red')
+        echo(f"Error: app '{app}' not found.", fg='red')
 
 
 def deploy_gradle(app, deltas={}):
@@ -402,7 +404,7 @@ def deploy_gradle(app, deltas={}):
     }
 
     if exists(env_file):
-        env.update(parse_settings(env_file, env))
+        env |= parse_settings(env_file, env)
 
     if not exists(java_path):
         makedirs(java_path)
@@ -433,7 +435,7 @@ def deploy_java(app, deltas={}):
     }
 
     if exists(env_file):
-        env.update(parse_settings(env_file, env))
+        env |= parse_settings(env_file, env)
 
     if not exists(java_path):
         makedirs(java_path)
@@ -465,7 +467,7 @@ def deploy_clojure(app, deltas={}):
         "LEIN_HOME": environ.get('LEIN_HOME', join(environ['HOME'], '.lein')),
     }
     if exists(env_file):
-        env.update(parse_settings(env_file, env))
+        env |= parse_settings(env_file, env)
     echo("-----> Building Clojure Application")
     call('lein clean', cwd=join(APP_ROOT, app), env=env, shell=True)
     call('lein uberjar', cwd=join(APP_ROOT, app), env=env, shell=True)
@@ -481,22 +483,21 @@ def deploy_go(app, deltas={}):
 
     first_time = False
     if not exists(go_path):
-        echo("-----> Creating GOPATH for '{}'".format(app), fg='green')
+        echo(f"-----> Creating GOPATH for '{app}'", fg='green')
         makedirs(go_path)
         # copy across a pre-built GOPATH to save provisioning time
-        call('cp -a $HOME/gopath {}'.format(app), cwd=ENV_ROOT, shell=True)
+        call(f'cp -a $HOME/gopath {app}', cwd=ENV_ROOT, shell=True)
         first_time = True
 
-    if exists(deps):
-        if first_time or getmtime(deps) > getmtime(go_path):
-            echo("-----> Running godep for '{}'".format(app), fg='green')
-            env = {
-                'GOPATH': '$HOME/gopath',
-                'GOROOT': '$HOME/go',
-                'PATH': '$PATH:$HOME/go/bin',
-                'GO15VENDOREXPERIMENT': '1'
-            }
-            call('godep update ...', cwd=join(APP_ROOT, app), env=env, shell=True)
+    if exists(deps) and (first_time or getmtime(deps) > getmtime(go_path)):
+        echo(f"-----> Running godep for '{app}'", fg='green')
+        env = {
+            'GOPATH': '$HOME/gopath',
+            'GOROOT': '$HOME/go',
+            'PATH': '$PATH:$HOME/go/bin',
+            'GO15VENDOREXPERIMENT': '1'
+        }
+        call('godep update ...', cwd=join(APP_ROOT, app), env=env, shell=True)
     return spawn_app(app, deltas)
 
 
@@ -511,7 +512,7 @@ def deploy_node(app, deltas={}):
 
     first_time = False
     if not exists(node_path):
-        echo("-----> Creating node_modules for '{}'".format(app), fg='green')
+        echo(f"-----> Creating node_modules for '{app}'", fg='green')
         makedirs(node_path)
         first_time = True
 
@@ -522,19 +523,27 @@ def deploy_node(app, deltas={}):
         "PATH": ':'.join([join(virtualenv_path, "bin"), join(node_path, ".bin"), environ['PATH']])
     }
     if exists(env_file):
-        env.update(parse_settings(env_file, env))
+        env |= parse_settings(env_file, env)
 
     # include node binaries on our path
     environ["PATH"] = env["PATH"]
 
     version = env.get("NODE_VERSION")
     node_binary = join(virtualenv_path, "bin", "node")
-    installed = check_output("{} -v".format(node_binary), cwd=join(APP_ROOT, app), env=env, shell=True).decode("utf8").rstrip(
-        "\n") if exists(node_binary) else ""
+    installed = (
+        check_output(
+            f"{node_binary} -v", cwd=join(APP_ROOT, app), env=env, shell=True
+        )
+        .decode("utf8")
+        .rstrip("\n")
+        if exists(node_binary)
+        else ""
+    )
+
 
     if version and check_requirements(['nodeenv']):
         if not installed.endswith(version):
-            started = glob(join(UWSGI_ENABLED, '{}*.ini'.format(app)))
+            started = glob(join(UWSGI_ENABLED, f'{app}*.ini'))
             if installed and len(started):
                 echo("Warning: Can't update node with app running. Stop the app & retry.", fg='yellow')
             else:
@@ -542,14 +551,17 @@ def deploy_node(app, deltas={}):
                 call("nodeenv --prebuilt --node={NODE_VERSION:s} --clean-src --force {VIRTUAL_ENV:s}".format(**env),
                      cwd=virtualenv_path, env=env, shell=True)
         else:
-            echo("-----> Node is installed at {}.".format(version))
+            echo(f"-----> Node is installed at {version}.")
 
-    if exists(deps) and check_requirements(['npm']):
-        if first_time or getmtime(deps) > getmtime(node_path):
-            echo("-----> Running npm for '{}'".format(app), fg='green')
-            symlink(node_path, node_path_tmp)
-            call('npm install', cwd=join(APP_ROOT, app), env=env, shell=True)
-            unlink(node_path_tmp)
+    if (
+        exists(deps)
+        and check_requirements(['npm'])
+        and (first_time or getmtime(deps) > getmtime(node_path))
+    ):
+        echo(f"-----> Running npm for '{app}'", fg='green')
+        symlink(node_path, node_path_tmp)
+        call('npm install', cwd=join(APP_ROOT, app), env=env, shell=True)
+        unlink(node_path_tmp)
     return spawn_app(app, deltas)
 
 
@@ -562,7 +574,7 @@ def deploy_python(app, deltas={}):
     # Peek at environment variables shipped with repo (if any) to determine version
     env = {}
     if exists(env_file):
-        env.update(parse_settings(env_file, env))
+        env |= parse_settings(env_file, env)
 
     # TODO: improve version parsing
     # pylint: disable=unused-variable
@@ -570,11 +582,11 @@ def deploy_python(app, deltas={}):
 
     first_time = False
     if not exists(join(virtualenv_path, "bin", "activate")):
-        echo("-----> Creating virtualenv for '{}'".format(app), fg='green')
+        echo(f"-----> Creating virtualenv for '{app}'", fg='green')
         try:
             makedirs(virtualenv_path)
         except FileExistsError:
-            echo("-----> Env dir already exists: '{}'".format(app), fg='yellow')
+            echo(f"-----> Env dir already exists: '{app}'", fg='yellow')
         call('virtualenv --python=python{version:d} {app:s}'.format(**locals()), cwd=ENV_ROOT, shell=True)
         first_time = True
 
@@ -582,8 +594,8 @@ def deploy_python(app, deltas={}):
     exec(open(activation_script).read(), dict(__file__=activation_script))
 
     if first_time or getmtime(requirements) > getmtime(virtualenv_path):
-        echo("-----> Running pip for '{}'".format(app), fg='green')
-        call('pip install -r {}'.format(requirements), cwd=virtualenv_path, shell=True)
+        echo(f"-----> Running pip for '{app}'", fg='green')
+        call(f'pip install -r {requirements}', cwd=virtualenv_path, shell=True)
     return spawn_app(app, deltas)
 
 
